@@ -231,3 +231,36 @@ def median_pairwise_distance_o(X, Y=None):
     distances = distances.reshape(-1, 1)
     distances = distances[~np.isnan(distances)]
     return np.median(distances)
+
+
+def mean_pairwise_distance_o(X, Y=None):
+    """
+    Heuristic for bandwidth of the RBF. Median pairwise distance of joint data.
+    If Y is missing, just calculate it from X:
+        this is so that, during training, as Y changes, we can use a fixed
+        bandwidth (and save recalculating this each time we evaluated the mmd)
+    At the end of training, we do the heuristic "correctly" by including
+    both X and Y.
+
+    Note: most of this code is assuming tensorflow, but X and Y are just ndarrays
+    """
+    if Y is None:
+        Y = X  # this is horrendously inefficient, sorry
+
+    if len(X.shape) == 2:
+        # matrix
+        X_sqnorms = np.einsum('...i,...i', X, X)
+        Y_sqnorms = np.einsum('...i,...i', Y, Y)
+        XY = np.einsum('ia,ja', X, Y)
+    elif len(X.shape) == 3:
+        # tensor -- this is computing the Frobenius norm
+        X_sqnorms = np.einsum('...ij,...ij', X, X)  # reduce the tensor shape
+        Y_sqnorms = np.einsum('...ij,...ij', Y, Y)
+        XY = np.einsum('iab,jab', X, Y)  # X*Y^T??
+    else:
+        raise ValueError(X)
+
+    distances = np.sqrt(X_sqnorms.reshape(-1, 1) - 2 * XY + Y_sqnorms.reshape(1, -1))
+    distances = distances.reshape(-1, 1)
+    distances = distances[~np.isnan(distances)]
+    return np.mean(distances)

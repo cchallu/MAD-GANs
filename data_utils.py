@@ -1,3 +1,4 @@
+from sys import dont_write_bytecode
 import numpy as np
 import pandas as pd
 import pdb
@@ -5,6 +6,8 @@ import re
 from time import time
 import json
 import random
+import os
+import pickle
 
 import model
 
@@ -461,7 +464,219 @@ def kdd99_test(seq_length, seq_step, num_signals):
 
     return samples, labels, index
 
+################################################################################################################
+################################################### CRISTIAN ###################################################
+################################################################################################################
+def get_random_occlusion_mask(dataset, n_intervals, occlusion_prob):
+    len_dataset, _, n_features = dataset.shape
 
+    interval_size = int(np.ceil(len_dataset/n_intervals))
+    mask = np.ones(dataset.shape)
+    for i in range(n_intervals):
+        u = np.random.rand(n_features)
+        mask_interval = (u>occlusion_prob)*1
+        mask[i*interval_size:(i+1)*interval_size, :, :] = mask[i*interval_size:(i+1)*interval_size, :, :]*mask_interval
+
+    # Add one random interval for complete missing features 
+    feature_sum = mask.sum(axis=0)
+    missing_features = np.where(feature_sum==0)[1]
+    for feature in missing_features:
+        i = np.random.randint(0, n_intervals)
+        mask[i*interval_size:(i+1)*interval_size, :, feature] = 1
+
+    return mask
+
+def load_smd(entities, downsampling_size, occlusion_intervals, occlusion_prob, root_dir='./data', verbose=True):
+
+    # ------------------------------------------------- Reading data -------------------------------------------------
+    train_data = np.loadtxt(f'{root_dir}/ServerMachineDataset/train/{entities}.txt', delimiter=',')
+    train_data = train_data[:, None, :]
+
+    test_data = np.loadtxt(f'{root_dir}/ServerMachineDataset/test/{entities}.txt',delimiter=',')
+    test_data = test_data[:, None, :]
+    len_test = len(test_data)
+
+    labels = np.loadtxt(f'{root_dir}/ServerMachineDataset/test_label/{entities}.txt',delimiter=',')
+
+    dataset = np.vstack([train_data, test_data])
+
+    if verbose:
+        print('Full Train shape: ', train_data.shape)
+        print('Full Test shape: ', test_data.shape)
+        print('Full Dataset shape: ', dataset.shape)
+        print('Full labels shape: ', labels.shape)
+        print('---------')
+
+    # ------------------------------------------------- Downsampling -------------------------------------------------
+    # Padding
+    right_padding = downsampling_size - dataset.shape[0]%downsampling_size
+    dataset = np.pad(dataset, ((right_padding, 0), (0,0), (0,0) ))
+
+    right_padding = downsampling_size - len_test%downsampling_size
+    labels = np.pad(labels, (right_padding, 0))
+
+    dataset = dataset.reshape(dataset.shape[0]//downsampling_size, -1, 1, dataset.shape[2]).max(axis=1)
+    labels = labels.reshape(labels.shape[0]//downsampling_size, -1).max(axis=1)
+    len_test_downsampled = int(np.ceil(len_test/downsampling_size))
+    
+    if verbose:
+        print('Downsampled Dataset shape: ', dataset.shape)
+        print('Downsampled labels: ', labels.shape)
+
+    train_data = dataset[:-len_test_downsampled]
+    test_data = dataset[-len_test_downsampled:]
+
+    # ------------------------------------------------- Training Occlusion Mask -------------------------------------------------
+    # Masks
+    mask_filename = f'{root_dir}/ServerMachineDataset/train/mask_{entities}_{occlusion_intervals}_{occlusion_prob}.p'
+    if os.path.exists(mask_filename):
+        if verbose:
+            print(f'Train mask {mask_filename} loaded!')
+        train_mask = pickle.load(open(mask_filename,'rb'))
+    else:
+        print('Train mask not found, creating new one')
+        train_mask = get_random_occlusion_mask(dataset=train_data, n_intervals=occlusion_intervals, occlusion_prob=occlusion_prob)
+        with open(mask_filename,'wb') as f:
+            pickle.dump(train_mask, f)
+        if verbose:
+            print(f'Train mask {mask_filename} created!')
+
+    test_mask = np.ones(test_data.shape)
+
+    if verbose:
+        print('Train Data shape: ', train_data.shape)
+        print('Test Data shape: ', test_data.shape)
+
+        print('Train Mask mean: ', train_mask.mean())
+        print('Test Mask mean: ', test_mask.mean())
+
+    train_data = train_data[:,0,:]
+    train_mask = train_mask[:,0,:]
+    test_data = test_data[:,0,:]
+    test_mask = test_mask[:,0,:]
+    
+    return train_data, train_mask, test_data, test_mask, labels
+
+
+def smd(machine, seq_length, seq_step, num_signals, occlusion_intervals, occlusion_prob):
+    print(f'load smd {machine}')
+    train_data, train_mask, _, _, _ = load_smd(entities=machine, downsampling_size=10, occlusion_intervals=occlusion_intervals,
+                                                    occlusion_prob=occlusion_prob, root_dir='./data', verbose=True)
+    
+    train_data = train_data*train_mask
+    print('train_data.shape', train_data.shape)
+
+    samples = train_data
+    labels = np.zeros(len(samples))
+    m, n = samples.shape  # m1=494021, n1=35
+
+    # normalization
+    for i in range(n - 1):
+        # print('i=', i)
+        A = max(samples[:, i])
+        # print('A=', A)
+        if A != 0:
+            samples[:, i] /= max(samples[:, i])
+            # scale from -1 to 1
+            samples[:, i] = 2 * samples[:, i] - 1
+        else:
+            samples[:, i] = samples[:, i]
+
+    #############################
+    ############################
+    # -- apply PCA dimension reduction for multi-variate GAN-AD -- #
+    # from sklearn.decomposition import PCA
+    # X_n = samples
+    # ####################################
+    # ###################################
+    # # -- the best PC dimension is chosen pc=6 -- #
+    # n_components = num_signals
+    # pca = PCA(n_components, svd_solver='full')
+    # pca.fit(X_n)
+    # ex_var = pca.explained_variance_ratio_
+    # pc = pca.components_
+    # # projected values on the principal component
+    # T_n = np.matmul(X_n, pc.transpose(1, 0))
+    # samples = T_n
+    # # only for one-dimensional
+    # samples = T_n.reshape([samples.shape[0], ])
+    ###########################################
+    ###########################################
+    num_samples = (samples.shape[0] - seq_length) // seq_step
+    aa = np.empty([num_samples, seq_length, num_signals])
+    bb = np.empty([num_samples, seq_length, 1])
+
+    for j in range(num_samples):
+        bb[j, :, :] = np.reshape(labels[(j * seq_step):(j * seq_step + seq_length)], [-1, 1])
+        for i in range(num_signals):
+            aa[j, :, i] = samples[(j * seq_step):(j * seq_step + seq_length), i]
+
+    samples = aa
+    labels = bb
+
+    return samples, labels
+
+
+def smd_test(machine, seq_length, seq_step, num_signals, occlusion_intervals, occlusion_prob):
+    print(f'load smd {machine}')
+    _, _, test_data, _, labels = load_smd(entities=machine, downsampling_size=10, occlusion_intervals=occlusion_intervals,
+                                                    occlusion_prob=occlusion_prob, root_dir='./data', verbose=True)
+    
+    print('test_data.shape', test_data.shape)
+    print('labels.shape', labels.shape)
+
+    samples = test_data
+    m, n = samples.shape  # m1=494021, n1=35
+    idx = np.asarray(list(range(0, m)))  # record the idx of each point
+
+    # normalization
+    for i in range(n - 1):
+        # print('i=', i)
+        A = max(samples[:, i])
+        # print('A=', A)
+        if A != 0:
+            samples[:, i] /= max(samples[:, i])
+            # scale from -1 to 1
+            samples[:, i] = 2 * samples[:, i] - 1
+        else:
+            samples[:, i] = samples[:, i]
+
+    #############################
+    ############################
+    # -- apply PCA dimension reduction for multi-variate GAN-AD -- #
+    # from sklearn.decomposition import PCA
+    # X_n = samples
+    ####################################
+    ###################################
+    # -- the best PC dimension is chosen pc=6 -- #
+    # n_components = num_signals
+    # pca = PCA(n_components, svd_solver='full')
+    # pca.fit(X_n)
+    # ex_var = pca.explained_variance_ratio_
+    # pc = pca.components_
+    # # projected values on the principal component
+    # T_n = np.matmul(X_n, pc.transpose(1, 0))
+    # samples = T_n
+    # # only for one-dimensional
+    # samples = T_n.reshape([samples.shape[0], ])
+    ###########################################
+    ###########################################
+    num_samples_t = (samples.shape[0] - seq_length) // seq_step
+    aa = np.empty([num_samples_t, seq_length, num_signals])
+    bb = np.empty([num_samples_t, seq_length, 1])
+    bbb = np.empty([num_samples_t, seq_length, 1])
+
+    for j in range(num_samples_t):
+        bb[j, :, :] = np.reshape(labels[(j * seq_step):(j * seq_step + seq_length)], [-1, 1])
+        bbb[j, :, :] = np.reshape(idx[(j * seq_step):(j * seq_step + seq_length)], [-1, 1])
+        for i in range(num_signals):
+            aa[j, :, i] = samples[(j * seq_step):(j * seq_step + seq_length), i]
+
+    samples = aa
+    labels = bb
+    index = bbb
+
+    return samples, labels, index
 # ############################ data pre-processing #################################
 # --- to do with loading --- #
 # --- to do with loading --- #
@@ -541,7 +756,7 @@ def get_samples_and_labels(settings):
     return samples, pdf, labels
 
 
-def get_data(data_type, seq_length, seq_step, num_signals, sub_id, eval_single, eval_an, data_options=None):
+def get_data(data_type, machine, seq_length, seq_step, num_signals, sub_id, eval_single, eval_an, data_options=None):
     """
     Helper/wrapper function to get the requested data.
     """
@@ -565,6 +780,10 @@ def get_data(data_type, seq_length, seq_step, num_signals, sub_id, eval_single, 
         samples, labels = wadi(seq_length, seq_step, num_signals)
     elif data_type == 'wadi_test':
         samples, labels, index = wadi_test(seq_length, seq_step, num_signals)
+    elif data_type == 'smd':
+        samples, labels = smd(machine, seq_length, seq_step, num_signals, 5, 0)
+    elif data_type == 'smd_test':
+        samples, labels, index = smd_test(machine, seq_length, seq_step, num_signals, 5, 0)
     else:
         raise ValueError(data_type)
     print('Generated/loaded', len(samples), 'samples from data-type', data_type)

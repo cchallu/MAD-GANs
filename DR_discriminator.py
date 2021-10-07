@@ -659,25 +659,33 @@ def invert(settings, samples, para_path, g_tolerance=None, e_tolerance=0.1,
 
     # define loss mmd-based loss
     if heuristic_sigma is None:
-        heuristic_sigma = mmd.median_pairwise_distance_o(samples)  # this is noisy
+        #heuristic_sigma = mmd.median_pairwise_distance_o(samples)  # this is noisy
+        heuristic_sigma = mmd.mean_pairwise_distance_o(samples)  # this is noisy
         print('heuristic_sigma:', heuristic_sigma)
     samples = tf.reshape(samples, [1, settings['seq_length'], settings['num_generated_features']])
-    Kxx, Kxy, Kyy, wts = mmd._mix_rbf_kernel(G_samples, samples, sigmas=tf.constant(value=heuristic_sigma, shape=(1, 1)))
-    similarity_per_sample = tf.diag_part(Kxy)
-    reconstruction_error_per_sample = 1 - similarity_per_sample
+    
+    #Kxx, Kxy, Kyy, wts = mmd._mix_rbf_kernel(G_samples, samples, sigmas=tf.constant(value=heuristic_sigma, shape=(1, 1)))    
+    # similarity_per_sample = tf.diag_part(Kxy)
+    # reconstruction_error_per_sample = 1 - similarity_per_sample
+
     # reconstruction_error_per_sample = tf.reduce_sum((tf.nn.l2_normalize(G_samples, dim=1) - tf.nn.l2_normalize(samples, dim=1))**2, axis=[1,2])
-    similarity = tf.reduce_mean(similarity_per_sample)
-    reconstruction_error = 1 - similarity
+    # similarity = tf.reduce_mean(similarity_per_sample)
+    # reconstruction_error = 1 - similarity
+
+    reconstruction_error_per_sample = (G_samples-samples)**2
+    reconstruction_error = tf.reduce_mean(reconstruction_error_per_sample)
+
+
     # updater
     #    solver = tf.train.AdamOptimizer().minimize(reconstruction_error_per_sample, var_list=[Z])
     # solver = tf.train.RMSPropOptimizer(learning_rate=500).minimize(reconstruction_error, var_list=[Z])
-    solver = tf.train.RMSPropOptimizer(learning_rate=0.1).minimize(reconstruction_error_per_sample, var_list=[Z])
-    # solver = tf.train.MomentumOptimizer(learning_rate=0.1, momentum=0.9).minimize(reconstruction_error_per_sample, var_list=[Z])
+    #solver = tf.train.RMSPropOptimizer(learning_rate=1.0).minimize(reconstruction_error_per_sample, var_list=[Z]) #0.1
+    solver = tf.train.MomentumOptimizer(learning_rate=0.5, momentum=0.9).minimize(reconstruction_error_per_sample, var_list=[Z])
 
     grad_Z = tf.gradients(reconstruction_error_per_sample, Z)[0]
     grad_per_Z = tf.norm(grad_Z, axis=(1, 2))
     grad_norm = tf.reduce_mean(grad_per_Z)
-    # solver = tf.train.GradientDescentOptimizer(learning_rate=0.1).minimize(reconstruction_error, var_list=[Z])
+    #solver = tf.train.GradientDescentOptimizer(learning_rate=0.1).minimize(reconstruction_error, var_list=[Z])
     print('Finding latent state corresponding to samples...')
 
     sess = tf.Session()
@@ -706,8 +714,9 @@ def invert(settings, samples, para_path, g_tolerance=None, e_tolerance=0.1,
                 while np.abs(error) > e_tolerance:
                     _ = sess.run(solver, feed_dict=fd)
                     error = sess.run(reconstruction_error, feed_dict=fd)
+                    #print(error)
+                    #print(sess.run(grad_norm))
                     i += 1
-                    # print(error)
                     if i > max_iter:
                         break
         Zs = sess.run(Z, feed_dict=fd)

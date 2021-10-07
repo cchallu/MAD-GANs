@@ -15,6 +15,7 @@ def rgan_options_parser():
     parser.add_argument('--data', help='what kind of data to train with?',
             default='gp_rbf',
             choices=['gp_rbf', 'sine', 'mnist', 'load'])
+    parser.add_argument('--machine', help='machine', type=str, default='')
     # parser.add_argument('--num_samples', type=int, help='how many training examples \
     #                 to generate?', default=28*5*100)
     # parser.add_argument('--num_samples_t', type=int, help='how many testing examples \

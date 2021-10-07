@@ -33,9 +33,12 @@ data_path = './experiments/data/' + settings['data_load_from'] + '.data.npy'
 print('Loading data from', data_path)
 settings["eval_an"] = False
 settings["eval_single"] = False
-samples, labels, index = data_utils.get_data(settings["data"], settings["seq_length"], settings["seq_step"],
+samples, labels, index = data_utils.get_data(settings["data"], settings['machine'], settings["seq_length"], settings["seq_step"],
                                              settings["num_signals"], settings['sub_id'], settings["eval_single"],
                                              settings["eval_an"], data_path)
+print('samples.shape', samples.shape)
+print('labels.shape', labels.shape)
+
 print('samples_size:',samples.shape)
 # -- number of variables -- #
 num_variables = samples.shape[2]
@@ -107,8 +110,8 @@ sess.run(tf.global_variables_initializer())
 # # -- plot the real samples -- #
 vis_real_indices = np.random.choice(len(samples), size=16)
 vis_real = np.float32(samples[vis_real_indices, :, :])
-plotting.save_plot_sample(vis_real, 0, identifier + '_real', n_samples=16, num_epochs=num_epochs)
-plotting.save_samples_real(vis_real, identifier)
+# plotting.save_plot_sample(vis_real, 0, identifier + '_real', n_samples=16, num_epochs=num_epochs)
+# plotting.save_samples_real(vis_real, identifier)
 
 # --- train --- #
 train_vars = ['batch_size', 'D_rounds', 'G_rounds', 'use_time', 'seq_length', 'latent_dim']
@@ -180,11 +183,16 @@ for epoch in range(num_epochs):
     #     MMD[epoch, ] = mmd2
 
     # -- save model parameters -- #
-    model.dump_parameters(sub_id + '_' + str(seq_length) + '_' + str(epoch), sess)
+model.dump_parameters(machine + '_' + str(seq_length) + '_' + str(epoch), sess)
 
-np.save('./experiments/plots/gs/' + identifier + '_' + 'MMD.npy', MMD)
+# np.save('./experiments/plots/gs/' + identifier + '_' + 'MMD.npy', MMD)
 
 end = time() - begin
 print('Training terminated | Training time=%d s' %(end) )
 
 print("Training terminated | training time = %ds  " % (time() - begin))
+
+
+# python RGAN.py --settings_file smd --machine 'machine-1-1'
+
+# python AD_Invert.py --settings_file smd_test --machine 'machine-1-1'

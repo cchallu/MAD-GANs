@@ -9,6 +9,7 @@ import utils
 import eval
 import DR_discriminator
 import data_utils
+import pickle
 
 # from pyod.utils.utility import *
 from sklearn.utils.validation import *
@@ -119,6 +120,12 @@ class myADclass():
                   .format(self.epoch, tao, Accu5, Pre5, Rec5, F15))
             results[i - 2+12, :] = [Accu5, Pre5, Rec5, F15]
 
+        with open('./experiments/machine_1_1_dl.p','wb') as f:
+            pickle.dump(DL_test, f)
+
+        with open('./experiments/machine_1_1_d.p','wb') as f:
+            pickle.dump(D_test, f)
+
         return results
 
 if __name__ == "__main__":
@@ -126,10 +133,11 @@ if __name__ == "__main__":
 
     Results = np.empty([settings['num_epochs'], 18, 4])
 
-    for epoch in range(settings['num_epochs']):
+    #for epoch in range(settings['num_epochs']):
     # for epoch in range(50, 60):
-        ob = myADclass(epoch)
-        Results[epoch, :, :] = ob.ADfunc()
+    epoch = settings['num_epochs']-1
+    ob = myADclass(epoch)
+    Results[epoch, :, :] = ob.ADfunc()
 
     # res_path = './experiments/plots/Results' + '_' + settings['sub_id'] + '_' + str(
     #     settings['seq_length']) + '.npy'
